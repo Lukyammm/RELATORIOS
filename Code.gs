@@ -13,6 +13,8 @@ const ABA_RELATORIO_CRP = 'BASE_DADOS(NÃOEDITAR)';
 const ABA_RELATORIO_CRO = 'CRO';
 const FUSO_HORARIO = 'America/Fortaleza';
 const META_INSTITUCIONAL = 80;
+const CACHE_EXECUCAO_PLANILHAS = {};
+const CACHE_EXECUCAO_BASE_RELATORIO = {};
 
 const ORDEM_MESES = {
   'JANEIRO': 1,
@@ -129,17 +131,32 @@ function registrarErro(origem, erro) {
   console.error(`[${origem}] ${detalhe}`);
 }
 
+function abrirPlanilhaPorIdCache(id, contexto) {
+  const planilhaId = String(id || '').trim();
+  if (!planilhaId) {
+    throw new Error(`ID da planilha não informado${contexto ? ' para ' + contexto : ''}.`);
+  }
+
+  if (CACHE_EXECUCAO_PLANILHAS[planilhaId]) {
+    return CACHE_EXECUCAO_PLANILHAS[planilhaId];
+  }
+
+  try {
+    const ss = SpreadsheetApp.openById(planilhaId);
+    CACHE_EXECUCAO_PLANILHAS[planilhaId] = ss;
+    return ss;
+  } catch (erro) {
+    throw new Error(`Falha ao abrir a planilha${contexto ? ' ' + contexto : ''} (${planilhaId}): ${erro.message || erro}`);
+  }
+}
+
 function abrirPlanilhaLeitura(chavePlanilha) {
   const id = PLANILHAS[chavePlanilha];
   if (!id) {
     throw new Error(`Planilha não parametrizada para a chave "${chavePlanilha}".`);
   }
 
-  try {
-    return SpreadsheetApp.openById(id);
-  } catch (erro) {
-    throw new Error(`Falha ao abrir a planilha "${chavePlanilha}" para leitura: ${erro.message || erro}`);
-  }
+  return abrirPlanilhaPorIdCache(id, `"${chavePlanilha}" para leitura`);
 }
 
 function executarComPlanilha(chavePlanilha, callback) {
@@ -450,7 +467,7 @@ function obterPlanilhaConfiguracaoRel(planilhaIdPreferencial) {
   const props = PropertiesService.getScriptProperties();
   const idPersistido = props.getProperty(CONFIG_REL_BOOTSTRAP_PROP_KEY);
   const id = idPersistido || planilhaIdPreferencial || PLANILHAS.relatorios;
-  return SpreadsheetApp.openById(id);
+  return abrirPlanilhaPorIdCache(id, 'de configuração do relatório');
 }
 
 function obterOuCriarAbaConfigRel(ss, padrao) {
@@ -627,11 +644,7 @@ function mesclarConfigRel(padrao, salvo) {
 function abrirPlanilhaRelatorio(cfg) {
   cfg = cfg || obterConfigRel();
   const id = cfg.planilhaId || PLANILHAS.relatorios;
-  try {
-    return SpreadsheetApp.openById(id);
-  } catch (erro) {
-    throw new Error(`Falha ao abrir a planilha do relatório (${id}): ${erro.message || erro}`);
-  }
+  return abrirPlanilhaPorIdCache(id, 'do relatório');
 }
 
 function emailUsuarioAtualRel() {
@@ -742,22 +755,34 @@ function obterAbaRelatorio(ss, comissao, cfg) {
 }
 
 function obterLinhasRelatorio(ss, comissao, cfg) {
-  const sh = obterAbaRelatorio(ss, comissao, cfg);
-  if (!sh) {
-    return { abaEncontrada: '', headers: [], linhas: [], estrutura: RELATORIO_CRP_ESTRUTURA, alertasEstrutura: ['Aba da CRP não encontrada.'] };
-  }
-  const range = sh.getDataRange();
-  const values = range.getValues();
-  const headers = values.length ? values[0].map(item => String(item || '').trim()) : [];
   const comissaoNormalizada = normalizarComissaoRelatorio(comissao);
+  const planilhaId = cfg && cfg.planilhaId ? String(cfg.planilhaId).trim() : (ss && ss.getId ? ss.getId() : PLANILHAS.relatorios);
+  const abaCfg = cfg && cfg.abaNome ? String(cfg.abaNome).trim() : '';
+  const chaveCache = [planilhaId, comissaoNormalizada, abaCfg].join('::');
 
-  return {
+  if (CACHE_EXECUCAO_BASE_RELATORIO[chaveCache]) {
+    return CACHE_EXECUCAO_BASE_RELATORIO[chaveCache];
+  }
+
+  const sh = obterAbaRelatorio(ss, comissaoNormalizada, cfg);
+  if (!sh) {
+    const vazio = { abaEncontrada: '', headers: [], linhas: [], estrutura: RELATORIO_CRP_ESTRUTURA, alertasEstrutura: ['Aba da CRP não encontrada.'] };
+    CACHE_EXECUCAO_BASE_RELATORIO[chaveCache] = vazio;
+    return vazio;
+  }
+
+  const values = sh.getDataRange().getValues();
+  const headers = values.length ? values[0].map(item => String(item || '').trim()) : [];
+  const base = {
     abaEncontrada: sh.getName(),
     headers: headers,
     linhas: values.slice(1).filter(row => row.some(cell => String(cell == null ? '' : cell).trim() !== '')),
     estrutura: comissaoNormalizada === 'CRP' ? RELATORIO_CRP_ESTRUTURA : [],
     alertasEstrutura: comissaoNormalizada === 'CRP' ? validarEstruturaCRP(headers) : []
   };
+
+  CACHE_EXECUCAO_BASE_RELATORIO[chaveCache] = base;
+  return base;
 }
 
 function obterCampoCRPPorIndice(idx) {
@@ -851,7 +876,7 @@ function montarPayloadRelatorios(ss, filtros, cfg) {
     geradoEm: Utilities.formatDate(new Date(), FUSO_HORARIO, "dd/MM/yyyy 'às' HH:mm"),
     filtros: coletarFiltrosRelatorio(baseCRP.linhas, baseCRP.abaEncontrada),
     aplicado: filtrosAplicados,
-    relatorio: processarRelatorioCRP(ss, filtrosAplicados, baseProcessamento, cfg)
+    relatorio: processarRelatorioCRP(filtrosAplicados, baseProcessamento, cfg)
   };
 }
 
@@ -894,9 +919,12 @@ function percentualRelatorio(conformes, naoConformes) {
   return denominador ? Number(((Number(conformes || 0) / denominador) * 100).toFixed(1)) : null;
 }
 
-function processarRelatorioCRP(ss, filtros, base, cfg) {
+function processarRelatorioCRP(filtros, base, cfg) {
   cfg = cfg || obterConfigRel();
-  base = base || obterLinhasRelatorio(ss, filtros.comissao || 'CRP', cfg);
+  if (!base) {
+    const ss = abrirPlanilhaRelatorio(cfg);
+    base = obterLinhasRelatorio(ss, filtros.comissao || 'CRP', cfg);
+  }
   const col = RELATORIO_CRP_COLUNAS;
   const termos = {
     conforme: new Set((cfg.termosConforme || []).map(normalizarTexto)),
