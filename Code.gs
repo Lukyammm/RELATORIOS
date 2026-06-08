@@ -318,13 +318,16 @@ const RELATORIO_ABAS_POR_COMISSAO = {
 
 /* ============================================================
    CONFIGURAÇÃO SELF-SERVICE DO RELATÓRIO (autodependência)
-   Mesma ideia da Fase 1 do boletim: a config editável fica em
-   Script Properties, com fallback para os padrões. Sem nada
-   salvo, o comportamento é idêntico (zero regressão).
+   A configuração editável agora fica na própria planilha, na aba
+   COSEP_REL_CONFIG. Script Properties permanece apenas como espelho
+   técnico/fallback para Web Apps standalone e migração segura.
    ============================================================ */
 const CONFIG_REL_PROP_KEY = 'COSEP_REL_CONFIG_V1';
+const CONFIG_REL_BOOTSTRAP_PROP_KEY = 'COSEP_REL_CONFIG_SPREADSHEET_ID';
 const CONFIG_REL_ADMINS_PROP_KEY = 'COSEP_REL_ADMINS';
+const CONFIG_REL_SHEET = 'COSEP_REL_CONFIG';
 const CONFIG_REL_LOG_SHEET = 'COSEP_REL_CONFIG_LOG';
+const CONFIG_REL_SCHEMA_VERSION = '1.0';
 
 function configPadraoRel() {
   return {
@@ -343,14 +346,191 @@ function configPadraoRel() {
 function obterConfigRel() {
   const padrao = configPadraoRel();
   try {
+    const cfgInicial = obterConfigRelDePropertiesOuPadrao(padrao);
+    const ssConfig = obterPlanilhaConfiguracaoRel(cfgInicial.planilhaId || padrao.planilhaId);
+    let sh = ssConfig.getSheetByName(CONFIG_REL_SHEET);
+
+    if (!sh) {
+      sh = ssConfig.insertSheet(CONFIG_REL_SHEET);
+      escreverConfigRelNaAba(sh, cfgInicial, 'Configuração inicial criada automaticamente');
+      espelharConfigRelEmProperties(cfgInicial);
+      return cfgInicial;
+    }
+
+    const cfgPlanilha = lerConfigRelDaAba(sh, padrao);
+    if (cfgPlanilha) {
+      espelharConfigRelEmProperties(cfgPlanilha);
+      return cfgPlanilha;
+    }
+  } catch (erro) {
+    registrarErro('obter-config-rel-aba', erro);
+  }
+
+  return obterConfigRelDePropertiesOuPadrao(padrao);
+}
+
+function obterConfigRelDePropertiesOuPadrao(padrao) {
+  try {
     const raw = PropertiesService.getScriptProperties().getProperty(CONFIG_REL_PROP_KEY);
     if (!raw) return padrao;
     return mesclarConfigRel(padrao, JSON.parse(raw));
   } catch (erro) {
-    registrarErro('obter-config-rel', erro);
+    registrarErro('obter-config-rel-properties', erro);
     return padrao;
   }
 }
+
+function obterPlanilhaConfiguracaoRel(planilhaIdPreferencial) {
+  try {
+    const ativa = SpreadsheetApp.getActiveSpreadsheet();
+    if (ativa) return ativa;
+  } catch (erro) {
+    // Em Web Apps standalone não há planilha ativa; usa fallback por ID.
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const idPersistido = props.getProperty(CONFIG_REL_BOOTSTRAP_PROP_KEY);
+  const id = idPersistido || planilhaIdPreferencial || PLANILHAS.relatorios;
+  return SpreadsheetApp.openById(id);
+}
+
+function obterOuCriarAbaConfigRel(ss, padrao) {
+  let sh = ss.getSheetByName(CONFIG_REL_SHEET);
+  if (sh) return sh;
+
+  sh = ss.insertSheet(CONFIG_REL_SHEET);
+  aplicarLayoutAbaConfigRel(sh);
+  escreverConfigRelNaAba(sh, padrao, 'Configuração inicial criada automaticamente');
+  return sh;
+}
+
+function aplicarLayoutAbaConfigRel(sh) {
+  try {
+    sh.setTabColor('#0f766e');
+    sh.setFrozenRows(1);
+    sh.getRange('A1:B1')
+      .setValues([['Campo', 'Valor']])
+      .setFontWeight('bold')
+      .setBackground('#0f766e')
+      .setFontColor('#ffffff');
+    sh.setColumnWidths(1, 1, 260);
+    sh.setColumnWidths(2, 1, 520);
+    sh.getRange('A:B').setWrap(true).setVerticalAlignment('top');
+  } catch (erro) {
+    registrarErro('layout-config-rel', erro);
+  }
+}
+
+function mapaLinhasConfigRel(sh) {
+  const values = sh.getDataRange().getValues();
+  const mapa = {};
+  values.forEach(row => {
+    const chave = String(row[0] || '').trim();
+    if (chave) mapa[chave] = row[1];
+  });
+  return mapa;
+}
+
+function lerListaConfigRel(valor) {
+  return String(valor == null ? '' : valor)
+    .split(/\r?\n|;/)
+    .map(item => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function lerIndicadoresConfigRel(mapa, padrao) {
+  const indicadores = padrao.indicadores.slice();
+  indicadores.forEach((nomePadrao, i) => {
+    const valor = mapa[`Indicador ${i + 1}`];
+    if (valor && String(valor).trim()) indicadores[i] = String(valor).trim();
+  });
+  return indicadores;
+}
+
+function lerConfigRelDaAba(sh, padrao) {
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) {
+    escreverConfigRelNaAba(sh, padrao, 'Configuração recriada porque a aba estava vazia');
+    return padrao;
+  }
+
+  const mapa = mapaLinhasConfigRel(sh);
+  const bruto = {
+    metaInstitucional: mapa['Meta institucional (%)'],
+    planilhaId: mapa['ID da planilha do relatório'],
+    abaNome: mapa['Aba da base CRP'],
+    termosConforme: lerListaConfigRel(mapa['Termos conforme']),
+    termosNaoConforme: lerListaConfigRel(mapa['Termos não conforme']),
+    termosNaoSeAplica: lerListaConfigRel(mapa['Termos não se aplica']),
+    indicadores: lerIndicadoresConfigRel(mapa, padrao),
+    atualizadoEm: String(mapa['Atualizado em'] || ''),
+    atualizadoPor: String(mapa['Atualizado por'] || '')
+  };
+
+  return mesclarConfigRel(padrao, bruto);
+}
+
+function escreverConfigRelNaAba(sh, cfg, observacao) {
+  const rows = [
+    ['Campo', 'Valor'],
+    ['Versão do esquema', CONFIG_REL_SCHEMA_VERSION],
+    ['Meta institucional (%)', cfg.metaInstitucional],
+    ['ID da planilha do relatório', cfg.planilhaId || PLANILHAS.relatorios],
+    ['Aba da base CRP', cfg.abaNome || ABA_RELATORIO_CRP],
+    ['Termos conforme', (cfg.termosConforme || []).join('\n')],
+    ['Termos não conforme', (cfg.termosNaoConforme || []).join('\n')],
+    ['Termos não se aplica', (cfg.termosNaoSeAplica || []).join('\n')],
+    ['Atualizado em', cfg.atualizadoEm || ''],
+    ['Atualizado por', cfg.atualizadoPor || ''],
+    ['Observação', observacao || 'Edite preferencialmente pela tela Administração do relatório.'],
+    ['', ''],
+    ['Indicadores da CRP', 'Renomeie abaixo mantendo a ordem dos indicadores da base']
+  ];
+
+  (cfg.indicadores || []).forEach((nome, i) => rows.push([`Indicador ${i + 1}`, nome || '']));
+
+  sh.clear();
+  sh.getRange(1, 1, rows.length, 2).setValues(rows);
+  aplicarLayoutAbaConfigRel(sh);
+  try {
+    sh.getRange(13, 1, 1, 2).setFontWeight('bold').setBackground('#e4f5f2').setFontColor('#0b4f4a');
+    sh.getRange(5, 2).setNote('Nome exato da aba que contém a base CRP.');
+    sh.getRange(6, 2, 3, 1).setNote('Um termo por linha. A comparação ignora maiúsculas/minúsculas e acentos nos termos já normalizados pelo sistema.');
+  } catch (erro) {
+    registrarErro('formatar-config-rel', erro);
+  }
+}
+
+function salvarConfigRelNaAba(cfg) {
+  const ssConfig = obterPlanilhaConfiguracaoRel(cfg.planilhaId || PLANILHAS.relatorios);
+  const sh = obterOuCriarAbaConfigRel(ssConfig, cfg);
+  escreverConfigRelNaAba(sh, cfg, 'Última gravação feita pela tela Administração do relatório');
+  espelharConfigRelEmProperties(cfg);
+}
+
+function espelharConfigRelEmProperties(cfg) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty(CONFIG_REL_PROP_KEY, JSON.stringify(cfg));
+    if (cfg && cfg.planilhaId) props.setProperty(CONFIG_REL_BOOTSTRAP_PROP_KEY, String(cfg.planilhaId).trim());
+  } catch (erro) {
+    registrarErro('espelhar-config-rel-properties', erro);
+  }
+}
+
+function removerConfigRelDaAba() {
+  const ssConfig = obterPlanilhaConfiguracaoRel(PLANILHAS.relatorios);
+  const sh = obterOuCriarAbaConfigRel(ssConfig, configPadraoRel());
+  escreverConfigRelNaAba(sh, configPadraoRel(), 'Configuração restaurada para o padrão pela tela Administração do relatório');
+  try {
+    const props = PropertiesService.getScriptProperties();
+    props.deleteProperty(CONFIG_REL_PROP_KEY);
+    props.deleteProperty(CONFIG_REL_BOOTSTRAP_PROP_KEY);
+  } catch (erro) {
+    registrarErro('limpar-config-rel-properties', erro);
+  }
+}
+
 
 function mesclarConfigRel(padrao, salvo) {
   if (!salvo || typeof salvo !== 'object') return padrao;
@@ -425,7 +605,7 @@ function salvarConfigRelCosep(novaConfig) {
     const merged = mesclarConfigRel(configPadraoRel(), novaConfig || {});
     merged.atualizadoEm = Utilities.formatDate(new Date(), FUSO_HORARIO, "dd/MM/yyyy 'às' HH:mm");
     merged.atualizadoPor = emailUsuarioAtualRel() || 'desconhecido';
-    PropertiesService.getScriptProperties().setProperty(CONFIG_REL_PROP_KEY, JSON.stringify(merged));
+    salvarConfigRelNaAba(merged);
     registrarLogRel(merged.atualizadoPor, 'Configuração do relatório atualizada');
     return { success: true, config: merged, mensagem: 'Configurações salvas com sucesso.' };
   });
@@ -434,7 +614,7 @@ function salvarConfigRelCosep(novaConfig) {
 function restaurarConfigRelCosep() {
   return executarRota('rpc-configrel-reset', () => {
     if (!usuarioPodeEditarRel()) return { success: false, mensagem: 'Você não tem permissão para alterar as configurações.' };
-    PropertiesService.getScriptProperties().deleteProperty(CONFIG_REL_PROP_KEY);
+    removerConfigRelDaAba();
     registrarLogRel(emailUsuarioAtualRel() || 'desconhecido', 'Configuração do relatório restaurada para o padrão');
     return { success: true, config: obterConfigRel(), mensagem: 'Configurações restauradas para o padrão.' };
   });
