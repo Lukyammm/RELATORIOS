@@ -405,6 +405,7 @@
       transition: transform .18s ease, box-shadow .18s ease, background .18s ease, color .18s ease;
     }
     .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-subtle); }
+    .btn[disabled]:hover { transform: none; box-shadow: none; }
     .btn-primary { background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff; box-shadow: 0 12px 28px rgba(15, 118, 110, .22); }
     .btn-secondary { border: 1px solid rgba(190, 211, 207, .9); }
     .btn-ghost { background: transparent; color: var(--brand-dark); }
@@ -446,9 +447,12 @@
       margin-top: 22px;
     }
     .spinner { width: 22px; height: 22px; border: 3px solid #dce8e6; border-top-color: var(--brand); border-radius: 50%; animation: spin .75s linear infinite; }
-    .btn .spinner { width: 16px; height: 16px; border-width: 2px; border-color: rgba(255,255,255,.38); border-top-color: #fff; }
+    .btn .spinner { width: 16px; height: 16px; border-width: 2px; border-color: rgba(255,255,255,.38); border-top-color: #fff; flex: 0 0 auto; }
     .btn-secondary .spinner { border-color: rgba(15,118,110,.18); border-top-color: var(--brand); }
-    .btn[disabled] { cursor: wait; opacity: .72; transform: none; box-shadow: none; }
+    .btn[disabled], .rms-trigger[disabled], .rms-act[disabled] { cursor: wait; opacity: .72; transform: none; box-shadow: none; }
+    .btn.is-loading { position: relative; overflow: hidden; }
+    .btn.is-loading::after { content: ''; position: absolute; inset: 0; background: linear-gradient(110deg, transparent, rgba(255,255,255,.18), transparent); transform: translateX(-120%); animation: shimmerButton 1.15s ease-in-out infinite; }
+    @keyframes shimmerButton { to { transform: translateX(120%); } }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .confirm-overlay {
@@ -1027,6 +1031,58 @@
       loading.innerHTML = active ? `<span class="spinner" aria-hidden="true"></span><span>${escapeHtml(message)}</span>` : '';
     }
 
+    const actionBarrier = { active: false, button: null };
+    const ACTION_BUTTON_SELECTOR = '.btn, .rms-trigger, .rms-act';
+
+    function setGlobalActionLoading(active, clickedButton, label) {
+      const buttons = Array.from(document.querySelectorAll(ACTION_BUTTON_SELECTOR));
+      if (active) {
+        actionBarrier.active = true;
+        actionBarrier.button = clickedButton || null;
+        buttons.forEach(button => {
+          if (!button.dataset.originalDisabled) button.dataset.originalDisabled = button.disabled ? '1' : '0';
+          button.disabled = true;
+          button.setAttribute('aria-busy', clickedButton && button === clickedButton ? 'true' : 'false');
+        });
+        if (clickedButton) {
+          if (!clickedButton.dataset.originalHtml) clickedButton.dataset.originalHtml = clickedButton.innerHTML;
+          clickedButton.classList.add('is-loading');
+          clickedButton.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${escapeHtml(label || 'Processando...')}</span>`;
+        }
+        return;
+      }
+
+      buttons.forEach(button => {
+        const wasDisabled = button.dataset.originalDisabled === '1';
+        button.disabled = wasDisabled;
+        button.removeAttribute('aria-busy');
+        delete button.dataset.originalDisabled;
+      });
+      if (actionBarrier.button) {
+        actionBarrier.button.classList.remove('is-loading');
+        if (actionBarrier.button.dataset.originalHtml) {
+          actionBarrier.button.innerHTML = actionBarrier.button.dataset.originalHtml;
+          delete actionBarrier.button.dataset.originalHtml;
+        }
+      }
+      actionBarrier.active = false;
+      actionBarrier.button = null;
+    }
+
+    async function executarComBarreiraAcao({ botao, rotulo, mensagem }, tarefa) {
+      if (actionBarrier.active) {
+        toast('Uma solicitação já está em andamento. Aguarde a conclusão para evitar chamadas duplicadas.', 'warning', 'Processamento em andamento');
+        return null;
+      }
+      setGlobalActionLoading(true, botao || null, rotulo || 'Processando...');
+      if (mensagem) setLoading(mensagem, true);
+      try {
+        return await tarefa();
+      } finally {
+        setGlobalActionLoading(false);
+      }
+    }
+
     function mostrarToast(message, tipo = 'info', titulo = '') {
       const root = document.getElementById('toast-root');
       if (!root) return;
@@ -1420,20 +1476,25 @@
       }
     }
 
-    async function gerarRelatorio(recriarTexto = false) {
-      setLoading('Lendo planilha e consolidando indicadores...');
-      try {
-        state.payload = await fetchPayload(obterFiltros());
-        if (recriarTexto || !textos.intro.value.trim()) gerarTextosPadrao();
-        atualizarHero();
-        renderRelatorio();
-        setLoading('', false);
-        toast('Relatório gerado com sucesso e pronto para impressão.', 'success', 'Relatório pronto');
-      } catch (error) {
-        console.error(error);
-        setLoading('Não foi possível gerar o relatório. Confira o nome da aba CRP na planilha e tente novamente.');
-        toast(error.message || 'Falha ao gerar relatório.', 'error', 'Erro na geração');
-      }
+    async function gerarRelatorio(recriarTexto = false, botao = null) {
+      return executarComBarreiraAcao({
+        botao,
+        rotulo: botao && botao.id === 'btn-aplicar-filtros' ? 'Aplicando...' : 'Gerando...',
+        mensagem: 'Lendo planilha e consolidando indicadores...'
+      }, async () => {
+        try {
+          state.payload = await fetchPayload(obterFiltros());
+          if (recriarTexto || !textos.intro.value.trim()) gerarTextosPadrao();
+          atualizarHero();
+          renderRelatorio();
+          setLoading('', false);
+          toast('Relatório gerado com sucesso e pronto para impressão.', 'success', 'Relatório pronto');
+        } catch (error) {
+          console.error(error);
+          setLoading('Não foi possível gerar o relatório. Confira o nome da aba CRP na planilha e tente novamente.');
+          toast(error.message || 'Falha ao gerar relatório.', 'error', 'Erro na geração');
+        }
+      });
     }
 
     function copiarResumo() {
@@ -1458,6 +1519,7 @@
 
     async function init() {
       setupTabs();
+      setGlobalActionLoading(true, null, 'Carregando...');
       try {
         const payload = await fetchPayload({ comissao: 'CRP' });
         state.payload = payload;
@@ -1471,11 +1533,13 @@
         console.error(error);
         setLoading('Não foi possível carregar os filtros. A aba CRP precisa existir na planilha.');
         toast(error.message || 'Não foi possível carregar os filtros.', 'error', 'Inicialização indisponível');
+      } finally {
+        setGlobalActionLoading(false);
       }
     }
 
-    document.getElementById('btn-gerar').addEventListener('click', () => gerarRelatorio(false));
-    document.getElementById('btn-aplicar-filtros').addEventListener('click', () => gerarRelatorio(false));
+    document.getElementById('btn-gerar').addEventListener('click', ev => gerarRelatorio(false, ev.currentTarget));
+    document.getElementById('btn-aplicar-filtros').addEventListener('click', ev => gerarRelatorio(false, ev.currentTarget));
     document.getElementById('btn-limpar-filtros').addEventListener('click', limparFiltros);
     idsFiltros.forEach(id => document.getElementById(id).addEventListener('change', atualizarResumoFiltros));
     document.getElementById('btn-texto').addEventListener('click', () => { gerarTextosPadrao(); renderRelatorio(); toast('Texto padrão restaurado com base nos indicadores atuais.', 'success', 'Narrativa atualizada'); });
@@ -1690,14 +1754,14 @@
         ev.preventDefault();
         if (!arelPodeEditar) return;
         const btn = document.getElementById('arel-salvar');
-        const orig = btn ? btn.innerHTML : '';
-        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" aria-hidden="true"></span> Salvando...'; }
-        try {
-          const resp = await arelFetch('save', coletarConfigRel());
-          if (resp && resp.success) { if (resp.config) renderConfigRel(resp.config); toast(resp.mensagem || 'Configurações salvas.', 'success', 'Administração'); }
-          else toast((resp && resp.mensagem) || 'Não foi possível salvar.', 'error', 'Administração');
-        } catch (e) { toast(String((e && e.message) || e), 'error', 'Administração'); }
-        finally { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }
+        await executarComBarreiraAcao({ botao: btn, rotulo: 'Salvando...', mensagem: 'Salvando configurações com segurança...' }, async () => {
+          try {
+            const resp = await arelFetch('save', coletarConfigRel());
+            if (resp && resp.success) { if (resp.config) renderConfigRel(resp.config); toast(resp.mensagem || 'Configurações salvas.', 'success', 'Administração'); }
+            else toast((resp && resp.mensagem) || 'Não foi possível salvar.', 'error', 'Administração');
+          } catch (e) { toast(String((e && e.message) || e), 'error', 'Administração'); }
+          finally { setLoading('', false); }
+        });
       });
       if (btnReset) btnReset.addEventListener('click', async () => {
         if (!arelPodeEditar) return;
@@ -1709,15 +1773,14 @@
           tipo: 'danger'
         });
         if (!confirmado) { toast('Restauração cancelada. Nenhuma alteração foi feita.', 'info', 'Administração'); return; }
-        const origReset = btnReset.innerHTML;
-        btnReset.disabled = true;
-        btnReset.innerHTML = '<span class="spinner" aria-hidden="true"></span> Restaurando...';
-        try {
-          const resp = await arelFetch('reset');
-          if (resp && resp.success) { if (resp.config) renderConfigRel(resp.config); toast(resp.mensagem || 'Configurações restauradas.', 'success', 'Administração'); }
-          else toast((resp && resp.mensagem) || 'Não foi possível restaurar.', 'error', 'Administração');
-        } catch (e) { toast(String((e && e.message) || e), 'error', 'Administração'); }
-        finally { btnReset.disabled = false; btnReset.innerHTML = origReset; }
+        await executarComBarreiraAcao({ botao: btnReset, rotulo: 'Restaurando...', mensagem: 'Restaurando configuração padrão...' }, async () => {
+          try {
+            const resp = await arelFetch('reset');
+            if (resp && resp.success) { if (resp.config) renderConfigRel(resp.config); toast(resp.mensagem || 'Configurações restauradas.', 'success', 'Administração'); }
+            else toast((resp && resp.mensagem) || 'Não foi possível restaurar.', 'error', 'Administração');
+          } catch (e) { toast(String((e && e.message) || e), 'error', 'Administração'); }
+          finally { setLoading('', false); }
+        });
       });
     })();
 
