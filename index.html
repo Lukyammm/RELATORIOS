@@ -827,7 +827,7 @@
         <div class="section-head">
           <div>
             <h2>Administração do relatório</h2>
-            <p>Configure a meta, a base de dados, os indicadores e os termos de classificação sem mexer no código. As alterações valem para os próximos relatórios.</p>
+            <p>Configure a meta, a base de dados, os indicadores e os termos de classificação sem mexer no código. Tudo fica salvo na aba COSEP_REL_CONFIG da planilha do relatório.</p>
           </div>
           <span class="status-pill"><i class="fa-solid fa-gear"></i> Self-service</span>
         </div>
@@ -1580,7 +1580,7 @@
       const info = document.getElementById('arel-info');
       if (info) info.innerHTML = cfg.atualizadoEm
         ? `Última alteração em <strong>${escapeHtml(cfg.atualizadoEm)}</strong>${cfg.atualizadoPor ? ' por <strong>' + escapeHtml(cfg.atualizadoPor) + '</strong>' : ''}`
-        : 'Ainda sem alterações registradas.';
+        : 'Ainda sem alterações registradas na aba COSEP_REL_CONFIG.';
       if (!arelPodeEditar) {
         document.querySelectorAll('#admin-rel-form input, #admin-rel-form textarea, #admin-rel-form button').forEach(el => el.setAttribute('disabled', 'disabled'));
       }
