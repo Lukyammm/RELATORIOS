@@ -1,6 +1,6 @@
 # RELATORIOS
 
-Web App em Google Apps Script para geração do Relatório Analítico COSEP com dados em Google Sheets.
+Web App em Google Apps Script para geração do Relatório Analítico CRP com dados em Google Sheets.
 
 ## Arquitetura
 
@@ -36,8 +36,8 @@ A planilha do relatório deve conter, no mínimo:
 
 - `BASE_DADOS(NÃOEDITAR)`: base principal CRP com cabeçalhos de `A` até `AQ`.
 - `CRO`: base futura/alternativa para CRO, quando disponível.
-- `COSEP_REL_CONFIG`: aba criada automaticamente pelo app para guardar configurações editáveis do relatório.
-- `COSEP_REL_CONFIG_LOG`: aba criada automaticamente para histórico de alterações administrativas.
+- `CRP_REL_CONFIG`: aba criada automaticamente pelo app para guardar configurações editáveis do relatório.
+- `CRP_REL_CONFIG_LOG`: aba criada automaticamente para histórico de alterações administrativas.
 
 ## Filtros disponíveis
 
@@ -63,7 +63,7 @@ A comissão `CRO` permanece como recurso futuro, desativada na interface.
 
 ## Administração do relatório
 
-A aba `COSEP_REL_CONFIG` armazena:
+A aba `CRP_REL_CONFIG` armazena:
 
 - meta institucional;
 - ID da planilha do relatório e nome da aba da base CRP;
@@ -75,11 +75,11 @@ A aba `COSEP_REL_CONFIG` armazena:
 - dados da última atualização.
 
 A edição recomendada é pelo painel **Admin** dentro do app. Use
-**Recarregar da planilha** quando alguém editar `COSEP_REL_CONFIG`
+**Recarregar da planilha** quando alguém editar `CRP_REL_CONFIG`
 diretamente. Salvar configurações relê automaticamente a base, pois termos e
 indicadores afetam a classificação dos itens.
 
-Para restringir quem pode salvar, defina a Script Property `COSEP_REL_ADMINS`
+Para restringir quem pode salvar, defina a Script Property `CRP_REL_ADMINS`
 com e-mails separados por vírgula ou ponto e vírgula.
 
 ## Rotas e RPCs

@@ -1,5 +1,5 @@
 /***********************************************************************
- * RELATÓRIO ANALÍTICO COSEP — backend Apps Script
+ * RELATÓRIO ANALÍTICO CRP — backend Apps Script
  *
  * Arquitetura: o servidor lê a base CRP uma única vez por requisição,
  * classifica cada item dos indicadores (Conforme / Não conforme / N.A.)
@@ -256,16 +256,16 @@ function normalizarAno(valor) {
 
 /* ============================================================
    CONFIGURAÇÃO SELF-SERVICE DO RELATÓRIO
-   A configuração editável vive na aba COSEP_REL_CONFIG da própria
+   A configuração editável vive na aba CRP_REL_CONFIG da própria
    planilha. Script Properties é apenas espelho técnico/fallback.
    ============================================================ */
-const CONFIG_REL_PROP_KEY = 'COSEP_REL_CONFIG_V1';
-const CONFIG_REL_BOOTSTRAP_PROP_KEY = 'COSEP_REL_CONFIG_SPREADSHEET_ID';
-const CONFIG_REL_ADMINS_PROP_KEY = 'COSEP_REL_ADMINS';
-const CONFIG_REL_SHEET = 'COSEP_REL_CONFIG';
-const CONFIG_REL_LOG_SHEET = 'COSEP_REL_CONFIG_LOG';
+const CONFIG_REL_PROP_KEY = 'CRP_REL_CONFIG_V1';
+const CONFIG_REL_BOOTSTRAP_PROP_KEY = 'CRP_REL_CONFIG_SPREADSHEET_ID';
+const CONFIG_REL_ADMINS_PROP_KEY = 'CRP_REL_ADMINS';
+const CONFIG_REL_SHEET = 'CRP_REL_CONFIG';
+const CONFIG_REL_LOG_SHEET = 'CRP_REL_CONFIG_LOG';
 const CONFIG_REL_SCHEMA_VERSION = '2.0';
-const CONFIG_REL_CACHE_KEY = 'COSEP_REL_CONFIG_CACHE_V2';
+const CONFIG_REL_CACHE_KEY = 'CRP_REL_CONFIG_CACHE_V2';
 const CONFIG_REL_CACHE_TTL_SECONDS = 21600; // 6 horas
 
 const TEXTOS_PADRAO_REL = {
