@@ -1,22 +1,7 @@
 /***********************************************************************
- * RELATÓRIO ANALÍTICO COSEP — backend Apps Script
- *
- * Arquitetura: o servidor lê a base CRP uma única vez por requisição,
- * classifica cada item dos indicadores (Conforme / Não conforme / N.A.)
- * e devolve um dataset compacto. Todo o filtro, agregação e montagem do
- * documento acontecem no navegador — sem novas viagens ao servidor a
- * cada mudança de filtro.
- *
- * Rotas:
- *   doGet                      → serve index.html
- *   doGet?api=dados            → dataset compacto + configuração pública
- *   doGet?api=configrel        → configuração completa (admin)
- *
- * RPCs (google.script.run):
- *   obterDadosRelatorio()      → mesmo payload de api=dados
- *   obterConfigRelCosep()      → configuração completa (admin)
- *   salvarConfigRelCosep(cfg)  → grava configuração
- *   restaurarConfigRelCosep()  → restaura configuração padrão
+ * RELATÓRIO ANALÍTICO CRP — App independente (mesmo modelo do Boletim)
+ * Backend Apps Script. Serve index.html e fornece os dados (CRP).
+ * Autossuficiente: não depende do Code.gs do Boletim.
  ***********************************************************************/
 
 /* ===== Parametrização ===== */
@@ -140,7 +125,7 @@ function doGet(e) {
     template.appUrl = ScriptApp.getService().getUrl();
     return template
       .evaluate()
-      .setTitle('Relatório Analítico da CRP')
+      .setTitle('Relatório Analítico CRP')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (erro) {
     registrarErro('html-route', erro);
